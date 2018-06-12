@@ -1,0 +1,581 @@
+---
+title: "Gun Deaths Exploratory Data Analysis"
+output: html_document
+---
+Full Disclosure: The majority of this project came from a gun deaths visualization project I completed at Emory University. The goal of the original project was to run exploratory analyses on the dataset in R and then create a meaningful visualization in D3.js that would capture one of my interesting findings. This R Markdown file was modified to fit the requirements of Udacity's Exploratory Data Analysis project, with a few new plots added in and some superfluous tables and graphs removed.
+
+##The Dataset
+
+This dataset, which contains information on deaths by the hand of a gun from 2012 to 2014, came from FiveThirtyEight's Gun Deaths in America project, which can be viewed here: (https://fivethirtyeight.com/features/gun-deaths/). The full dataset is available on (https://github.com/fivethirtyeight/guns-data).
+
+For my project, I focused on suicides and accidental deaths from a gun. My reason for this focus was to show that while mass shootings are an important issue, there are other ways that guns can kill and other reasons they should be regulated.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE
+  )
+
+# clear the enviornment
+rm(list=ls())
+# prevent numbers from appearing in scientific notation.
+options(scipen=999)
+
+library(readr)
+library(tidyverse)
+```
+
+```{r dataset}
+gun_deaths <- read_csv("~/Documents/Udacity Projects/Exploratory Data Analysis/gun_deaths_final.csv")
+```
+
+The variables of the dataset are:
+
+* year - integer; the year in which a gun death occurred (2012, 2013, 2014)
+* month - numeric; the month in which a gun death occurred (1, 2, 3, ..., 12)
+* intent - character; the type of death that occurred ("Homicide", "Suicide", "Accidental", "Undetermined")
+* police - integer; indicator variable for whether a police officer was the victim of the shooting (0,1)
+* sex - character; sex of the victim ("M", "F")
+* age - integer; age of the victim (0, 1, 2, ..., 107)
+* race - character; race of the victim ("White", "Black", "Hispanic", "Asian/Pacific Islander", "Native American/Native Alaskan")
+* hispanic - integer; N/A (tried contacting the person who put together the dataset with no response)
+* place - character; place in which the gun death occurred ("Street", "Home", "Farm", "Industrial/construction", "Residential institution", "School/institution", "Sports", "Trade/service area", "Other specified", "Other unspecified")
+* education - character; education level of the victim ("Less than HS", "HS/GED", "Some college", "BA+")
+
+To make my analyses more interesting, I created three new variables:
+
+* year-month - factor; the year and month of a gun incident combined ("01-2012", "02-2012", ..., "12-2014"). Used to look at gun deaths over time (rather than just by month or year).
+
+* age_group -  factor; the age group of the victim. Divided the age variable into the following categories:
+    + 2 and under
+    + 3 through 12
+    + 13 through 17
+    + 18 through 24
+    + 25 through 39
+    + 40 through 59
+    + 60 through 74
+    + 75 and older
+
+The age divisions were created roughly based on the ones created in this chart (http://www.widener.edu/about/campus_resources/wolfgram_library/documents/life_span_chart_final.pdf). I created this variable in order to more clearly see differences among age groups in terms of gun deaths.
+
+* seasons - factor; the month variable divided into four categories ("Winter", "Spring", "Summer", "Fall"). December through February were the winter months. March through May were the spring months. June through August were the summer months. And finally, September through November were the fall months. This variable was created in order to see if any trends in gun deaths occurred at different times of the year.
+
+```{r year_month variable}
+gun_deaths$year_month <- paste(gun_deaths$month, gun_deaths$year, sep = "-")
+```
+
+```{r year_month levels}
+gun_deaths$year_month <- factor(gun_deaths$year_month, levels = c("01-2012",
+  "02-2012","03-2012", "04-2012", "05-2012", "06-2012", "07-2012", "08-2012", 
+  "09-2012", "10-2012", "11-2012", "12-2012","01-2013", "02-2013", "03-2013",
+  "04-2013", "05-2013", "06-2013", "07-2013", "08-2013", "09-2013", "10-2013",
+  "11-2013", "12-2013", "01-2014", "02-2014", "03-2014", "04-2014", "05-2014",
+  "06-2014", "07-2014", "08-2014", "09-2014", "10-2014", "11-2014",
+  "12-2014"))
+```
+
+```{r age_group variable}
+gun_deaths <- gun_deaths %>%
+mutate(age_group = cut(age, breaks = c(-1,2,12,17,24,39,59,74,107),
+  labels = c("2 and under", "3 to 12", "13 to 17", "18 to 24", "25 to 39",
+             "40 to 59", "60 to 74","75 and older"), 
+  include_left = TRUE, right = TRUE),
+  age_group = factor(age_group, labels = c("2 and under", "3 to 12", 
+                                           "13 to 17", "18 to 24", "25 to 39",
+                                           "40 to 59", "60 to 74",
+                                           "75 and older")))
+```
+
+```{r seasons variable}
+gun_deaths$month <- as.numeric(gun_deaths$month)
+
+# created a separate group for winter months since breaking a variable
+# into different groups has to be in a continuous manner and 1,2, and 12
+# aren't continuous. The other seasons are continuous though.
+winter_months <- c(1,2,12)
+  
+gun_deaths <- gun_deaths %>%
+mutate(seasons = cut(month, breaks = c(2,5,8,11), labels = c("Spring", 
+                                                             "Summer","Fall"), 
+  include_left = TRUE, right = TRUE),
+  seasons = ifelse(month %in% winter_months, "Winter", seasons),
+  seasons = factor(seasons, labels = c("Spring", "Summer","Fall", "Winter")))
+```
+
+##Exploratory Analysis
+
+I created a few tables to get a sense of the full dataset before dividing it into dataframes for suicides and accidental deaths. The following are tables of some important variables in the dataset, showing the proportions of gun deaths for the different values of those variables. The tables are followed by bar charts to provide a visual aid for those proportions.
+
+```{r simple bar chart function}
+simple_bar_chart <- function(data, variable, xlabel, title){
+  data %>%
+  ggplot(mapping  = aes(variable)) +
+    geom_bar() +
+    theme_minimal() +
+    xlab(xlabel) +
+    ylab("# of deaths") +
+    ggtitle(title)
+}
+```
+
+```{r sex initial percentages}
+prop.table(table(gun_deaths$sex))
+```
+
+```{r sex bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$sex, "Sex", "Gun Deaths by Sex")
+```
+
+The victims were 86% Male and 14% Female.
+
+```{r race}
+prop.table(table(gun_deaths$race))
+```
+
+```{r race bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$race, "Race", "Gun Deaths by Race")
+```
+
+The victims were 1% Asian/Pacific Islander, 23% Black, 9% Hispanic, 1% Native American/Native Alaskan, and 66% White. 
+
+```{r education}
+prop.table(table(gun_deaths$education))
+```
+
+```{r education bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$education, "Education Level",
+                 "Gun Deaths by Education Level")
+```
+
+For education levels:
+
+* 22% of victims had less than a high school diploma
+* 43% of victims had a high school diploma or GED
+* 22% of victims had some college education
+* 13% of victims had a bachelor's degree or higher
+
+```{r intent}
+prop.table(table(gun_deaths$intent))
+```
+
+```{r intent bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$intent, "Intent",
+                 "Gun Deaths by Intent")
+```
+
+The deaths were 2% accidental, 35% homicidal, 63% suicidal, and less than 1% undetermined.
+
+```{r season}
+prop.table(table(gun_deaths$seasons))
+```
+
+```{r seasons bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$seasons, "Season",
+                 "Gun Deaths by Season")
+```
+
+When looking at deaths by season, 25% of deaths occurred in the spring, 26% occurred in the summer, 25% occurred in the fall, 24% occurred in the winter.
+
+```{r police}
+prop.table(table(gun_deaths$police))
+```
+
+99% of gun death victims were not police officers. No histogram was needed.
+
+
+```{r place}
+prop.table(table(gun_deaths$place))
+```
+
+```{r updated bar chart function}
+# I created a new function for cases in which the simple bar chart function
+# leads to overlapping labels
+updated_bar_chart <- function(variable, xlabel, title){
+  gun_deaths %>%
+  ggplot(mapping  = aes(variable)) +
+    geom_bar() +
+    xlab(xlabel) +
+    ylab("# of deaths") +
+    # Fixes the labels on the x axis to be turned 90 degrees and be more
+    # spaced out for better readability 
+    theme(axis.text.x=element_text(angle=90, hjust=1)) + 
+    ggtitle(title)
+}
+```
+
+```{r place bar chart}
+updated_bar_chart(gun_deaths$place, "Location", "Gun Deaths by Location")
+```
+
+For location of death:
+
+* Less than 1% took place on a farm
+* 61% took place at a home
+* Less than 1% took place in an industrial/construction area
+* Less than 1% took place at a residential institution
+* 1% took place at a school/institution
+* Less than 1% took place in a sports area
+* 11% took place in the street
+* 3% took place in a trade/service area
+* 14% took place in a miscellaneous specified area
+* 9% took place in a miscellaneous unspecified area
+
+```{r year}
+prop.table(table(gun_deaths$year))
+```
+
+```{r year bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$year, "Year", "Gun Deaths by Year")
+```
+
+The year variable is divided evenly, with 33% of deaths in 2012, 33% of deaths in 2013, and 33% of deaths in 2014.
+
+Proportion tables were not as relevant for month and year_month, but a histogram was created for month and a bar chart was created for year-month to help visualize their distributions
+
+```{r histogram function}
+simple_histogram <- function(variable, xlabel, title){
+  ggplot(data = gun_deaths, aes(x = variable)) +
+    geom_histogram() +
+    theme_minimal() +
+    xlab(xlabel) +
+    ylab("# of deaths") +
+    ggtitle(title)
+}
+```
+
+```{r month histogram}
+simple_histogram(gun_deaths$month, "Month", "Gun Deaths by Month")
+```
+
+```{r year_month bar chart}
+updated_bar_chart(gun_deaths$year_month, "Year-Month",
+                  "Gun Deaths by Year-Month")
+```
+
+```{r age_group}
+prop.table(table(gun_deaths$age_group))
+```
+
+```{r age_group bar chart}
+simple_bar_chart(gun_deaths, gun_deaths$age_group, "Age Group",
+                 "Gun Deaths by Age Group")
+```
+
+The breakdown of victims by age group is as follows:
+
+* Ages 0-2 - less than 1%
+* Ages 3-12 - 1%
+* Ages 13-17 - 3%
+* Ages 18-24 - 16%
+* Ages 25-39 - 27%
+* Ages 40-59 - 31%
+* Ages 60-74 - 14%
+* Ages 75+ - 8%
+
+For the age variable, I looked at some summary statistics and created a histogram.
+
+```{r age statistics}
+summary(gun_deaths$age)
+```
+
+```{r age histogram}
+simple_histogram(gun_deaths$age, "Age", "Gun Deaths by Age")
+```
+
+A histogram of death counts by age shows that for the full dataset, there is a rise and fall of death counts as age increases (it appears almost like a positively skewed normal distribution). The peak of this graph occurs in the 15-30 area. This makes sense, as the age groups of 18-24 and 25-39 take up about 43% of the total deaths when combined.
+
+I then divided the dataset into dataframes for suicides and accidental deaths to see how they compared.
+
+```{r filters}
+suicides <- gun_deaths %>%
+  filter(intent == "Suicide")
+
+accidental <- gun_deaths %>%
+  filter(intent == "Accidental")
+```
+
+```{r deaths over time}
+over_time = function(data, title){
+  data %>%
+  group_by(year_month) %>%
+  # n() is a variable used to represent a count of the variable you are
+  # grouping by
+  summarise(n = n()) %>%
+  ggplot(mapping  = aes(x = year_month, y = n)) +
+    geom_point() +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+    xlab("Year-Month") +
+    ylab("# of deaths") +
+    ggtitle(title)
+}
+
+over_time(suicides, "Suicides Over Time")
+
+over_time(accidental, "Accidental Deaths Over Time")
+```
+
+When death counts are plotted over time (using the year-month variable) for both suicides and accidental deaths, it can be seen that there are simply fluctuations of deaths from month to month. However, in both dataframes there is no real change that can be seen over the years.
+
+Instead, let's see what happens when we look at counts for each month (so all deaths from January are aggregated for 2012, 2013, and 2014, for example).
+
+```{r deaths by month}
+simple_bar_chart(suicides, suicides$month, "Month", "Suicides by Month")
+
+simple_bar_chart(accidental, accidental$month, "Month",
+                 "Accidental Deaths by Month")
+```
+
+For suicides, we see a pretty uniform distribution. For accidental deaths, there isn't really a clear trend either, except that maybe the summer months and the end of the year months have more deaths. Let's look at accidental deaths by season to see if anything interesting shows up.
+
+```{r accidental by season}
+simple_bar_chart(accidental, accidental$seasons, "Season",
+                 "Accidental Deaths by Season")
+```
+
+It looks like the winter months have the most accidental deaths, but not by that much.
+
+Taking the focus away from time of year, I was interested in seeing whether police officer deaths played a big role in either category.
+
+```{r police deaths}
+table(suicides$police)
+table(accidental$police)
+```
+
+The first result is from suicides; the second is from accidental deaths. The police variable is an indicator variable, meaning a "0" denotes that a police officer was not a victim in that death while a "1" indicates they were. These tables seem to say that no police officers committed suicide or were killed accidentally. While these results are surprising, they actually makes sense if you read where the data was gathered from on FiveThirtyEight's website: (https://fivethirtyeight.com/features/gun-deaths/). One source of the data was shootings committed by police officers while another was police officers being killed in the line of duty. Therefore, due to the nature of both of these sources, police officers dying by suicide or an accidental shooting would likely not be included in this dataset, even though these incidents probably occurred in those years.
+
+To investigate the source of these police officer deaths further, I created a dataframe of police deaths and a proportion table for the "intent" variable in that dataframe. Here are the results:
+
+```{r police dataframe}
+police_deaths <- gun_deaths %>%
+  filter(police == "1")
+```
+
+```{r police proportions by intent}
+prop.table(table(police_deaths$intent))
+```
+
+We can see that 100% of the deaths of police officers in this dataset are from homicidal shootings.
+
+Returning to age, let's remind ourselves of the statistics we found for the full dataset:
+
+```{r age statistics repeat}
+summary(gun_deaths$age)
+```
+
+Now let's compare them to the statistics for suicides and accidental deaths in that order:
+
+```{r more age statistics}
+summary(suicides$age)
+summary(accidental$age)
+```
+
+We can see that the statistics are significantly higher for the suicides dataframe than for the accidental deaths dataframe and the full dataset. This is likely because suicide rates are low among young children and high among middle aged men (which will be discussed later). In contrast, many more young people are killed accidentally by the hand of a gun, which is why the third quartile is at a low age of 54 (this will also be discussed later on). The summary statistics for accidental deaths are all lower than those of the full dataset.
+
+While these statistics are helpful, it would also be beneficial to zoom in and see the death counts at individual ages for both dataframes and look for any trends over the ages. First, let's look at suicides:
+
+```{r age line plots function}
+# xmax variable used because the two dataframes have different max values
+# that will be used in the scale_x_continuous() function
+age_line_plot <- function(data, xmax, title){
+  data %>%
+  group_by(age) %>%
+  summarise(n = n()) %>%
+  ggplot(mapping  = aes(x = age, y = n)) +
+    geom_point() +
+    geom_line() +
+    scale_x_continuous(breaks = seq(0,xmax, 5)) + 
+    theme_minimal() +
+    xlab("Age") +
+    ylab("# of deaths") +
+    ggtitle(title)
+}
+```
+
+```{r suicides age line plots}
+age_line_plot(suicides, 105, "Suicides by Age")
+```
+
+Interesting. The graph seems to steadily rise until age 22, and steadily fall at around age 70.
+
+```{r suicides by age group plot}
+simple_bar_chart(suicides, suicides$age_group, "Age Group",
+                 "Suicides by Age Group")
+```
+
+When looking at age groups instead of individual ages, this trend basically holds up, and the distribution looks fairly normal. The peak at ages 40 to 59 is consistent with the line graph, but I expected the 18 to 24 group to have a larger bar based on the graph above.
+
+What about the accidental deaths?
+
+```{r accidental age line plots}
+age_line_plot(accidental, 100, "Accidental Deaths by Age")
+```
+
+This graph seems to peak more in certain areas, though there is still a general decline after age 22.
+
+```{r accidental by age group plot}
+simple_bar_chart(accidental, accidental$age_group, "Age Group",
+                 "Accidental Deaths by Age Group")
+```
+
+This distribution looks about normal too, albeit negatively skewed. What's surprising about it is that it shows a peak at the same age group as the suicides dataframe, even though the line plot shows a peak much earlier (closer to ages 18 to 24). Still, the bars for the younger ages are higher than those in the graph of suicides. 
+
+Along similar lines, are there certain months of the year where people of certain ages are killed more? And does this vary by race?
+
+```{r month and age function}
+month_and_age <- function(data, title){
+  data %>%
+  ggplot(mapping  = aes(x = month, y = age, color = race)) +
+    geom_point() +
+    theme_minimal() +
+    # I divided the graphs into years just see if there was a consistency in 
+    # trend among the years
+    facet_wrap(~year) +
+    xlab("Month") +
+    ylab("Age") +
+    labs(color= "Race") +
+    ggtitle(title)
+}
+```
+
+```{r suicides month and age}
+month_and_age(suicides, "Suicides by Month, Age, and Race")
+```
+
+```{r accidental month and age}
+month_and_age(accidental, "Accidental Deaths by Month, Age, and Race")
+```
+
+Across both dataframes and for all years, there does not seem to be any relationship between month and age. There is no clear trend among races either.
+
+Let's take a look at the correlation between month and age (using Pearson's R) for both dataframes to confirm whether there is really no relationship.
+
+First suicides:
+
+```{r suicide correlations}
+cor(suicides$age, suicides$month, use = "complete.obs", method = "pearson")
+```
+
+That's almost zero correlation, which means close to no relationship is present.
+
+Let's look at accidental deaths:
+
+```{r accidental correlations}
+cor(accidental$age, accidental$month, use = "complete.obs",
+    method = "pearson")
+```
+
+Not as small of a correlation but still close to zero. No relationship here either.
+
+I then decided to look at proportions of different categorical variables across the age groups. I used either side-by-side bar charts or stacked bar charts, depending on which was easier to interpret for each variable. Here are the plots for each variable, with suicides preceding accidental deaths each time.
+
+```{r stacked/side-by-side bar charts function}
+# since I am creating multiple similar stacked/side-by-side bar charts, 
+# variable_to_group is simply the variable I am grouping by 
+# (other than age_group)
+# position will either be "fill" (for stacked bar charts) or "dodge" 
+# (for side-by-side bar charts)
+bar_charts <- function(data, variable_to_group, position_setting, 
+                       legend_title, ylabel, title){
+  data %>%
+  ggplot() +
+    geom_bar(aes(x = age_group, fill = variable_to_group),
+             position = position_setting) +
+    guides(fill=guide_legend(title = legend_title)) +
+    xlab("Age Group") +
+    ylab(ylabel) +
+    theme(axis.text.x=element_text(angle=90, hjust=1)) +
+    ggtitle(title)
+}
+```
+
+Race:
+
+```{r age groups and race}
+bar_charts(suicides, suicides$race, "fill", "Race", "Proportion of Deaths",
+           "Suicides by Age Group and Race")
+
+bar_charts(accidental, accidental$race, "fill", "Race",
+           "Proportion of Deaths", "Accidental Deaths by Age Group and Race")
+```
+
+Location:
+
+```{r age groups and place}
+bar_charts(suicides, suicides$place, "fill", "Location",
+           "Proportion of Deaths", "Suicides by Age Group and Location")
+
+bar_charts(accidental, accidental$place, "fill", "Location",
+           "Proportion of Deaths", 
+           "Accidental Deaths by Age Group and Location")
+```
+
+Sex:
+
+```{r age groups and sex}
+bar_charts(suicides, suicides$sex, "dodge", "Sex", "# of deaths",
+           "Suicides by Age Group and Sex")
+
+bar_charts(accidental, accidental$sex, "dodge", "Sex", "# of deaths",
+           "Accidental Deaths by Age Group and Sex")
+```
+
+Season:
+
+```{r age groups and seasons}
+bar_charts(suicides, suicides$seasons, "dodge", "Season", "# of deaths",
+           "Suicides by Age Group and Season")
+
+bar_charts(accidental, accidental$seasons, "dodge", "Season", "# of deaths",
+           "Accidental Deaths by Age Group and Season")
+```
+
+Education Level:
+
+```{r age groups and education}
+bar_charts(suicides, suicides$education, "dodge", "Education Level",
+           "# of deaths", "Suicides by Age Group and Education Level")
+
+bar_charts(accidental, accidental$education, "dodge", "Education Level",
+           "# of deaths",
+           "Accidental Deaths by Age Group and Education Level")
+```
+
+##Final Plots
+
+The first plot I want to highlight is the line graph of death counts for each age. I used both the suicidal and accidental plots as the basis for my project at Emory. The D3.js visualization highlighted some interesting areas of the plots, in order to emphasize the effects that guns have at different ages.
+
+```{r suicides age line plots copy}
+age_line_plot(suicides, 105, "Suicides by Age")
+```
+
+In my project, I highlighted the peak of the graph at ages 45-62, with a fact that I believed helps explain this peak. The text reads "Veterans have high firearm suicide rates." Accompanying the text, there is a citation of a study from a literature review conducted by the Harvard T.H. Chan School of Public Health found here (https://www.hsph.harvard.edu/hicrc/firearms-research/).
+I included this fact because I believe veteran suicide rates contribute at least partially to this peak.
+
+```{r accidental age line plots copy}
+age_line_plot(accidental, 100, "Accidental Deaths by Age")
+```
+
+In my project, I also highlighted certain areas of this graph. First, I pointed out that at age 0, there were already 11 accidental deaths. This is one of the main differences between this graph and the suicides one: the deaths start a younger age. This detail can be attributed to many factors, including lack of child proof gun laws or poor gun storage regulation. Another part of the graph I highlighted was the peak at ages 17-27, which is significantly lower than the peak ages of the suicides graph. The text that I included here read "Majority of firearm accidents occur under age 24. Most young people are shot by someone their own age." This came from the same Harvard literature review. The reason I decided on these graphs for my D3.js visualization, instead of the bar charts of age groups, was to highlight the trends at individual ages, rather than forcing the viewer to make inferences based on somewhat arbitrary age divisions.
+
+While I ended up choosing the plots above to focus on for my project, there were some other interesting plots I did not get to highlight. One of them is the stacked bar chart of deaths by race for each age group, specifically the one from the accidental deaths dataframe:
+
+```{r}
+accidental %>%
+  #Removes NA's from the variable, which makes the plot look nicer 
+  drop_na(age_group) %>%
+  ggplot() +
+    geom_bar(aes(x = age_group, fill = race),
+             position = "fill") +
+    guides(fill=guide_legend(title = "Race")) +
+    xlab("Age Group") +
+    ylab("Proportion of Deaths") +
+    theme(axis.text.x=element_text(angle=90, hjust=1)) +
+    ggtitle("Accidental Deaths by Age Group and Race")
+```
+
+In contrast to the suicides graph (shown earlier in the report), in which white people represent about 75% or more of the deaths for each age group, this graph shows significantly higher proportions of black people killed at younger ages. There are a few possible factors that could have led to these higher proportions. My best guess is that this occurs because police officers disproportionately kill young black people more than young people of other races. While these killings are motivated by racial prejudices, they are often recorded as accidents, because police officers responsible for these shootings believe that they are accidents consciously and report them as so. While I cannot claim definitively that this is the reason behind these differing results, the larger proportions certainly caught my attention, and this theory was the first thing to come to mind.
+
+##Reflection
+
+Although this R markdown file was a stepping stone for a specific visualization, it was definitely an engaging process to discover some patterns that were more obvious within the dataset and some that were less obvious. The visualization I ended up creating for my project could not capture all of the interesting findings that came up in my exploration. There were some fundamental differences between the suicides and accidental deaths dataframes but the two groups were also more similar than I expected at some points. Therefore, exploration was key to really understanding the dataset. One challenge of working with this dataset, however, was that the majority of the variables were categorical, making it difficult to find relationships between variables. This caused me to work with counts of variables most of the time, which is why majority of the visualizations are bar charts. This also forced me to work with age a lot, since it was the only quantitative variable that showed interesting (inferred) relationships with other variables. I am satisfied with the amount I explored the age and age group variables, and I feel that I learned a lot in the process. Nevertheless, this decision to focus on age really set the tone for the majority of the project, and I did not explore other variables much, except when it came to their relationship with age. One area of future analysis can involve grouping the data by race or education the way I did for age groups, and seeing what interesting findings come up in those areas. Finally, I felt limited in that dataset only had information on the victims of gun deaths and not on the shooters themselves. While my focus was on suicides and accidental deaths, I may have focused on homicides more if there was information on the shooter. In conclusion, while exploring this dataset was a rewarding process, it would be greatly beneficial if similar data was collected from the last few years with information on both parties involved in a shooting, and with new variables added in.
